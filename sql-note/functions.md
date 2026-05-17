@@ -8,7 +8,7 @@ DATE_ADD(date, INTERVAL value addunit)
 
 作用：
 
-给日期增加1天。
+增减日期。
 
 ---
 
