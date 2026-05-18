@@ -58,6 +58,15 @@ SELECT DATE_FORMAT('2017-06-15', '%Y-%m-%d')
 
 <br>
 
+# 交叉链接
+```sql
+select * from Students cross join Subjects
+```
+
+---
+
+<br>
+
 # 其他
 ```sql
 NULL 安全相等运算符 <=>
@@ -69,26 +78,3 @@ sum(if(order_date = min_date, 1, 0)) --非常耗时
 LEFT JOIN 如果右表没有匹配的行，则右表字段会返回 NULL,所以可以换inner join
 ```
 
----
-
-<br>
-
-# 窗口函数
-```sql
-with ranked as (
-    select dense_rank() over (
-        partition by departmentId order by salary desc) rs,
-        name,salary,departmentId from Employee)
-select d1.name Department,r1.name Employee,r1.Salary from (
-    select * from ranked
-    where rs<=3) r1
-```
-
----
-
-<br>
-
-# 交叉链接
-```sql
-SELECT * FROM Students s CROSS JOIN Subjects sub
-```
