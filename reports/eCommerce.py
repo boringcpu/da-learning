@@ -8,15 +8,17 @@
 5. 工作日/周末漏斗对比
 6. 商品类别漏斗对比
 7. 输出业务建议
+
+v1.1：映射字典
 """
+
 
 import pandas as pd
 import numpy as np
 
-# 生成模拟数据
 np.random.seed(42)
 
-# 用户数量
+# 数据集生成
 n_users = 500
 
 uid = np.arange(1, n_users+1)
@@ -41,16 +43,21 @@ df = pd.DataFrame(records, columns=['uid','event','timestamp'])
 
 print(df.head())
 
+
 # 漏斗分析
-df['event']=df['event'].str.replace('register','0_register')
-df['event']=df['event'].str.replace('login','1_login')
-df['event']=df['event'].str.replace('browse','2_browse')
-df['event']=df['event'].str.replace('click','3_click')
-df['event']=df['event'].str.replace('purchase','4_purchase')
+event_map = {
+    'register':'0_register',
+    'login':'1_login',
+    'browse':'2_browse',
+    'click':'3_click',
+    'purchase':'4_purchase'
+}
+df['event'] = df['event'].map(event_map)
 # 每一步人数
 df_step_num=df.groupby('event')['uid'].nunique()
 # 计算转化率
 funnel=df_step_num/df_step_num.shift(1)
+
 funnel=funnel.to_frame()
 funnel.fillna(1,inplace=True)
 funnel.reset_index(inplace=True)
