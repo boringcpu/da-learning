@@ -67,7 +67,7 @@ for col in num_cols:
   plt.figure(figsize=(8,2))
   plt.boxplot(
       train_data[col].dropna(),
-      vert=False
+      vert=False # 是否垂直
   )
   plt.title(col)
   plt.show()
@@ -88,6 +88,12 @@ sns.heatmap(
 )
 plt.title("Correlation Heatmap")
 plt.show()
+
+
+plt.scatter(train_data['Age'],train_data['Fare'],marker='.',
+           cmap = 'Reds',
+           alpha = 0.8,)
+
 
 # 数值特征分布分析主要关注偏态、异常值和长尾现象。
 # 通常通过统计偏度、箱线图和直方图进行分析。
