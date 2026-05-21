@@ -77,5 +77,6 @@ IFNULL(grouped.attended_exams, 0)
 sum(if(order_date = min_date, 1, 0)) --非常耗时
 LEFT JOIN 如果右表没有匹配的行，则右表字段会返回 NULL,所以可以换inner join
 保留关键字使用反引号转义，eg.`rank`
+枚举类型的排序按题目的自定义来
 ```
 

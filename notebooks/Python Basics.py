@@ -196,8 +196,6 @@ print(pd.date_range('2017/1/1','2017/5/1', freq = 'WOM-2MON'))
 #7D：7天；2h30min：2小时30分钟；2M：2月，每月最后一个日历日
 ts.asfreq('4H',method = 'ffill')# 改变频率
 
-# pd.date_range()-日期范围：超前/滞后数据
-
 ts = pd.Series(np.random.rand(4),
               index = pd.date_range('20170101','20170104'))
 ts.shift(2)# 正数：数值后移（滞后）ts.shift(2)['col']
@@ -232,16 +230,15 @@ df.columns.str.replace(' ','-',n=1)
 
 s = pd.Series(['a,b,c','1,2,3',['a,,,c'],np.nan])
 s.str.split(',')[0]
-print(s.str.split(',', expand=True))
-print(s.str.split(',', expand=True, n = 1))
+print(s.str.split(',', expand=True)) # 展开成dataframe
+print(s.str.split(',', expand=True, n = 1)) # 分割一次
 
 s = pd.Series(list('ascaazsd'))
 print(s.replace({'a':'hello world!','s':123}))
 s.replace([1,2,3],np.nan,inplace = True)# 多值用np.nan代替
 
-sre = pd.concat([s5,s6], axis=1, keys = ['one','two'])#keys为列名
-print(df.groupby('a')['b'].agg({'result1':np.mean,
-                               'result2':np.sum}))#keys为列名
+sre = pd.concat([s5,s6], axis=1, keys = ['one','two']) # keys给拼接来源对象命名
+print(df.groupby('a')['b'].agg(result1='mean',result2='sum')) # 给聚合结果命名
 
 #透视表
 date = ['2017-5-1','2017-5-2','2017-5-3']*3
