@@ -321,7 +321,7 @@ np.argsort(abs(lm.coef_))[0][-5:]
 dict.get(key[, value]) # 没指定value则返回None
 
 import copy # 复制像class一样的复合对象
-centers = copy.deepcopy(centers)# deepcopy用的是.copy()
+centers = copy.deepcopy(centers)# deepcopy类似于.copy()
 
 smallest_distance = float("inf")
 
