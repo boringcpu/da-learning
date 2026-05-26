@@ -7,7 +7,10 @@ import seaborn as sns
 plt.rcParams['font.sans-serif'] = [u'SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
+RANDOM_STATE=42 
 
+
+# url=r'D:\BC53\我的文档\XTC\PYTHON\titanic'
 url=r'C:\tmp\Titanic'
 for dirname, _, filenames in os.walk(url):
     for filename in filenames:
@@ -144,6 +147,54 @@ men = train_data.loc[train_data.Sex == 'male']["Survived"]
 rate_men = sum(men)/len(men)
 print("% of men who survived:", rate_men)
 
+
+# def preprocess(df):
+#     df = df.copy()    
+#     df["Name"] = (
+#         df["Name"]
+#         .str.replace(r'[,\(\)\[\].\"\']','',regex=True) # 正则
+#         )
+#     df["Ticket_number"] = (
+#         df["Ticket"]
+#         .str.split(" ")
+#         .str[-1]
+#         )
+#     df["Ticket_item"] = (
+#         df["Ticket"].str.split(" ")
+#         .str[:-1]
+#         .str.join('_')
+#         .replace('','None') # 整列判断不用str
+#         )
+#     return df
+
+# preprocessed_train_df = preprocess(train_data)
+# preprocessed_serving_df = preprocess(test_data)
+# preprocessed_train_df.head(5)
+
+
+# 训练集 + 测试集合并做特征工程
+data = pd.concat([train_data, test_data], sort=False)
+data["Name_len"] = data["Name"].apply(lambda x: len(x.split()))
+data["Has_Mr"] = data["Name"].str.contains("Mr").astype(int)
+data["Has_Miss"] = data["Name"].str.contains("Miss").astype(int)
+data["Has_Mrs"] = data["Name"].str.contains("Mrs").astype(int)
+# 缺失处理
+data["Age"] = data["Age"].fillna(data["Age"].median())
+data["Fare"] = data["Fare"].fillna(data["Fare"].median())
+data["Embarked"].fillna(data["Embarked"].mode()[0],inplace=True) # 用众数填充
+# 类别编码
+data = pd.get_dummies(data, columns=["Sex", "Embarked"], drop_first=True)
+
+train = data[data["Survived"].notna()]
+test = data[data["Survived"].isna()]
+
+X = train.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId"], axis=1)
+y = train["Survived"]
+
+X_test = test.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId"], 
+                   axis=1)
+
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import KFold
@@ -151,15 +202,15 @@ from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import Pipeline
 
-y = train_data["Survived"]
-features = ["Pclass", "Sex", "SibSp", "Parch"]
-X = pd.get_dummies(train_data[features])
-X_test = pd.get_dummies(test_data[features])
-model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=1)
+
+# 随机森林
+model = RandomForestClassifier(n_estimators=100, max_depth=5, 
+                               random_state=RANDOM_STATE)
 model.fit(X, y)
 y_predict = model.predict(X)
 predictions = model.predict(X_test)
 
+# 逻辑回归_l1
 pipe_clf = Pipeline([
       ('sc',StandardScaler()),
       ('power_trans',PowerTransformer()),
@@ -169,14 +220,54 @@ pipe_clf = Pipeline([
       # ('rf',RandomForestClassifier(n_estimators=100, max_depth=5,
       #                              random_state=1))
       ])
+pipe_clf.fit(X,y)
+predictions = pipe_clf.predict(X_test)
+
+# GBDT
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import BaggingClassifier
+
+
+pipe_clf = Pipeline([
+      ('sc',StandardScaler()),
+      ('power_trans',PowerTransformer()),
+      ('polynom_trans',PolynomialFeatures(degree=3)),
+      ('LGBM_clf', LGBMClassifier(
+          n_estimators=500, #3、500~2000
+          learning_rate=0.05, #1
+          max_depth=-1, #2
+          random_state=RANDOM_STATE))
+      # ('rf',RandomForestClassifier(n_estimators=100, max_depth=5,
+      #                              random_state=1))
+      ])
+pipe_clf.fit(X,y)
+predictions = pipe_clf.predict(X_test)
+
+
+
+# 实验记录
+results = []
+results.append({
+    "model": "LGBM_v1",
+    "features": "basic + name_features",
+    "imputation": "median + mode",
+    "score": 0.82
+})
+pd.DataFrame(results).sort_values("score", ascending=False)
+
+# 如何“公平比较模型”
+# ① 数据划分一致
+# ② 特征一致
+# ③ 预处理一致
+# 变动模型、特征、预处理其中一个，看其提升程度
 
 # 混淆矩阵，准确率，精准率，召回率，roc，auc
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 from sklearn.metrics import roc_curve, auc, confusion_matrix
 import matplotlib.pyplot as plt
 
-pipe_clf.fit(X,y)
-y_predict = pipe_clf.predict(X)
+
 print(f'confusion_matrix：{confusion_matrix(y,y_predict)}')
 print(f'accuracy score is: {accuracy_score(y,y_predict)}')
 print(f'precision score is: {precision_score(y,y_predict)}')
@@ -220,6 +311,12 @@ plt.barh(
 
 plt.show()
 
-#output = pd.DataFrame({'PassengerId': test_data.PassengerId, 'Survived': predictions})
-#output.to_csv(r'D:\BC53\我的文档\XTC\tmp\my_submission.csv', index=False)
-#print("Your submission was successfully saved!")
+# submit
+output = pd.DataFrame({'PassengerId': test["PassengerId"], 
+                       'Survived': predictions.astype(int)})
+output.to_csv(r'C:\tmp\Titanic\my_submission.csv', index=False)
+print(output.head())
+print("Your submission was successfully saved!")
+print(output.shape)
+print(output.columns)
+print(output["Survived"].value_counts())
