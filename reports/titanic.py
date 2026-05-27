@@ -1,8 +1,22 @@
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
-import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.model_selection import StratifiedKFold
+# 混淆矩阵，准确率，精准率，召回率，roc，auc
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import roc_curve, auc, confusion_matrix
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import BaggingClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler, PowerTransformer
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import Pipeline
+import shap
+import os
 
 plt.rcParams['font.sans-serif'] = [u'SimHei']
 plt.rcParams['axes.unicode_minus'] = False
@@ -135,6 +149,15 @@ plt.title(
     "Age vs Survival"
 )
 plt.show()
+
+# Sex×Pclass
+pd.crosstab(
+    train["Sex"],
+    train["Pclass"],
+    values=train["Survived"],
+    aggfunc="mean"
+)
+
 # 数值特征分布分析主要关注偏态、异常值和长尾现象。
 # 通常通过统计偏度、箱线图和直方图进行分析。
 # 如果存在严重长尾分布，可以考虑对数变换；
@@ -173,48 +196,74 @@ print("% of men who survived:", rate_men)
 
 
 # 训练集 + 测试集合并做特征工程
-data = pd.concat([train_data, test_data], sort=False)
+# sort根据版本不同，默认值不同
+data = pd.concat([train_data, test_data], sort=False) 
+# 特征工程
+data["FamilySize"] = data["SibSp"] + data["Parch"] + 1
+data["IsAlone"] = (data["FamilySize"] == 1).astype(int)
 data["Name_len"] = data["Name"].apply(lambda x: len(x.split()))
-data["Has_Mr"] = data["Name"].str.contains("Mr").astype(int)
-data["Has_Miss"] = data["Name"].str.contains("Miss").astype(int)
-data["Has_Mrs"] = data["Name"].str.contains("Mrs").astype(int)
+# 性别的作用依赖于舱位，即男性在一等舱影响小在三等舱影响巨大
+# data["Sex_Pclass"] = data["Sex_male"] * data["Pclass"]
+# 从每个字符串中提取匹配第一个捕获组的内容
+# expand=False返回的是一个 Series（而不是单列的 DataFrame）
+# ，避免出现不必要的嵌套列
+data["Title"] = data["Name"].str.extract(" ([A-Za-z]+)\.", expand=False)
+data["Title"] = data["Title"].replace(
+    ["Mlle","Ms"], "Miss"
+).replace(
+    ["Mme"], "Mrs"
+)
+data["Title"] = data["Title"].replace(
+    ["Lady","Countess","Capt","Col","Don","Dr","Major","Rev","Sir","Jonkheer","Dona"],
+    "Rare"
+)
+data["HasCabin"] = data["Cabin"].notnull().astype(int)
+data["Fare_log"] = np.log1p(data["Fare"])
 # 缺失处理
 data["Age"] = data["Age"].fillna(data["Age"].median())
 data["Fare"] = data["Fare"].fillna(data["Fare"].median())
 data["Embarked"].fillna(data["Embarked"].mode()[0],inplace=True) # 用众数填充
 # 类别编码
-data = pd.get_dummies(data, columns=["Sex", "Embarked"], drop_first=True)
+data = pd.get_dummies(
+    data,
+    columns=["Sex","Embarked","Title"],
+    drop_first=True # 删除通过编码生成的第一个类别，避免虚拟变量陷阱
+)
 
 train = data[data["Survived"].notna()]
 test = data[data["Survived"].isna()]
 
-X = train.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId"], axis=1)
+X = train.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId", 'Fare'],
+               axis=1)
 y = train["Survived"]
 
-X_test = test.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId"], 
+X_test = test.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId", 'Fare'], 
                    axis=1)
 
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold
-from sklearn.preprocessing import StandardScaler, PowerTransformer
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.pipeline import Pipeline
 
 
-# 随机森林
+# “特征决定上限，模型逼近上限”
+# 树能学到 “Sex × Pclass” 这种组合规则
+# 缺点：不做 boosting → 提升有限
 model = RandomForestClassifier(n_estimators=100, max_depth=5, 
                                random_state=RANDOM_STATE)
 model.fit(X, y)
 y_predict = model.predict(X)
 predictions = model.predict(X_test)
 
-# 逻辑回归_l1
+# 逻辑回归_l1，能吃到“性别 + Pclass”主信号，但抓不到复杂交互
+# 有多重共线性风险
+# 多项式特征：
+# 特征少、样本量大、真实边界非线性明显——应该添加，特征多、样本量一般——谨慎添加，配合 L1/L2 正则化
+# 实用建议：
+# 先用无交互项的线性模型做 baseline
+# 再通过交叉验证尝试添加少量有业务意义的交互项
+# 如果性能提升明显且验证集稳定，则保留；否则移除
 pipe_clf = Pipeline([
       ('sc',StandardScaler()),
       ('power_trans',PowerTransformer()),
-      ('polynom_trans',PolynomialFeatures(degree=3)),
+      ('polynom_trans',PolynomialFeatures(degree=3)), # Titanic通常手动构造更合理
       ('logistic_clf', LogisticRegression(penalty='l1', fit_intercept=True,
                                            solver='liblinear'))
       # ('rf',RandomForestClassifier(n_estimators=100, max_depth=5,
@@ -223,28 +272,41 @@ pipe_clf = Pipeline([
 pipe_clf.fit(X,y)
 predictions = pipe_clf.predict(X_test)
 
-# GBDT
-from lightgbm import LGBMClassifier
-from sklearn.model_selection import RandomizedSearchCV
-from sklearn.ensemble import BaggingClassifier
+# GBDT，树模型不依赖矩阵求逆，共线性问题没那么大
+# 原则：小步走 + 多棵树
+# learning_rate	n_estimators
+# 0.1	         100~300
+# 0.05	         300~800
+# 0.03	         800~1500
+# 0.01	         2000+
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
+oof_scores = []
+test_preds = np.zeros(len(X_test))
 
-pipe_clf = Pipeline([
-      ('sc',StandardScaler()),
-      ('power_trans',PowerTransformer()),
-      ('polynom_trans',PolynomialFeatures(degree=3)),
-      ('LGBM_clf', LGBMClassifier(
-          n_estimators=500, #3、500~2000
-          learning_rate=0.05, #1
-          max_depth=-1, #2
-          random_state=RANDOM_STATE))
-      # ('rf',RandomForestClassifier(n_estimators=100, max_depth=5,
-      #                              random_state=1))
-      ])
-pipe_clf.fit(X,y)
-predictions = pipe_clf.predict(X_test)
+for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
 
+    X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+    y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
+    model = LGBMClassifier(
+        n_estimators=1000,
+        learning_rate=0.03,
+        num_leaves=31, # 31/63/127
+        subsample=0.8, # 随机抽80%样本减少过拟合
+        colsample_bytree=0.8, # 随机抽80%特征增加多样性
+        random_state=42
+    )
+
+    model.fit(X_train, y_train)
+
+    val_pred = model.predict(X_val)
+    acc = accuracy_score(y_val, val_pred)
+    oof_scores.append(acc)
+
+    test_preds += model.predict(X_test) / 5
+
+print("CV Accuracy:", np.mean(oof_scores))
 
 # 实验记录
 results = []
@@ -261,13 +323,6 @@ pd.DataFrame(results).sort_values("score", ascending=False)
 # ② 特征一致
 # ③ 预处理一致
 # 变动模型、特征、预处理其中一个，看其提升程度
-
-# 混淆矩阵，准确率，精准率，召回率，roc，auc
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
-from sklearn.metrics import roc_curve, auc, confusion_matrix
-import matplotlib.pyplot as plt
-
-
 print(f'confusion_matrix：{confusion_matrix(y,y_predict)}')
 print(f'accuracy score is: {accuracy_score(y,y_predict)}')
 print(f'precision score is: {precision_score(y,y_predict)}')
@@ -311,9 +366,15 @@ plt.barh(
 
 plt.show()
 
+# SHAP解释
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X)
+
+shap.summary_plot(shap_values, X)
+
 # submit
 output = pd.DataFrame({'PassengerId': test["PassengerId"], 
-                       'Survived': predictions.astype(int)})
+                       'Survived': (test_preds >= 0.5).astype(int)})
 output.to_csv(r'C:\tmp\Titanic\my_submission.csv', index=False)
 print(output.head())
 print("Your submission was successfully saved!")
