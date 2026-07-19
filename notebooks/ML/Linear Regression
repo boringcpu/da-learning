@@ -1,0 +1,118 @@
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import os
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+
+plt.rcParams['font.sans-serif'] = [u'SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+RANDOM_STATE=42 
+
+url=r'C:\TBC\数据分析师'
+
+df = pd.read_excel(url+r'\realestate_sample_preprocessed.xlsx')
+df.dropna(inplace=True)
+# 制作标签变量
+x = df.copy()[['area', 'daypop', 'nightpop',
+       'night20-39', 'sub_kde', 'bus_kde', 'kind_kde']]# 提取自变量
+y = df.copy()['average_price']# 提取应变量：数值型
+
+scaler=StandardScaler()
+x=scaler.fit_transform(x)
+
+# 3.2线性回归
+class LR():
+    def __init__(self):
+        self.w=None
+        self.b=None 
+        self.loss_history = []   # 保存每轮loss
+        
+    def get_loss(self,y,y_pre):
+        """
+        定义损失函数f(x)--> 均方误差
+        y: 真实值
+        y_pre: 预测值
+        """
+        loss=np.mean((y-y_pre)**2)
+        return loss
+    
+    def fit(self,x,y,learning_rate=0.01,n_iterations=500):
+        """
+        x 训练数据
+        y 目标值
+        learning_rate 学习率
+        n_iterations 迭代次数
+        """
+        sample,feature=x.shape
+        
+        if self.w==None:
+            #初始化数据
+            self.w=np.random.randn(feature)
+            self.b=0
+            
+        #开始训练
+        for i in range(n_iterations):
+            y_pre=np.dot(x,self.w)+self.b
+            #计算预测值与真实值之差  
+            # !!注意这里是预测值减真实值
+            diff=y_pre-y
+            #计算损失函数的梯度
+            dw=2/sample*np.dot(x.T,diff)
+            db=2/sample*np.sum(diff,axis=0)
+            
+            #更新参数
+            self.w=self.w-learning_rate*dw
+            self.b=self.b-learning_rate*db
+            
+            #计算loss 
+            loss=self.get_loss(y,y_pre)
+            self.loss_history.append(loss)
+            print("epoch:{}  loss:{}".format(i,loss))
+                  
+    def predict(self,x):
+        y_pre=np.dot(x,self.w)+self.b
+        return y_pre
+
+
+model=LR()
+model.fit(x,y)
+y_predict=model.predict(x) # mse: 8370.849938092
+
+plt.figure(figsize=(8,5))
+plt.plot(range(len(model.loss_history)), model.loss_history)
+plt.xlabel("Epoch")
+plt.ylabel("MSE Loss")
+plt.title("Gradient Descent Training")
+plt.grid(True)
+plt.show()
+
+from sklearn.metrics import mean_squared_error, f1_score
+print(f"mse: {np.sqrt(mean_squared_error(y, y_predict))}") # 均方误差
+
+plt.figure(figsize=(8,5))
+
+# 1的话会爆炸画不出图
+for lr in [0.1,0.01,0.001,0.0001,0.00001]:
+    model=LR()
+    model.fit(x,y,learning_rate=lr)
+    plt.plot(
+        model.loss_history,
+        label=str(lr)
+    )
+plt.legend()
+plt.yscale("log")
+plt.show()
+
+
+# sklearn用的是SVD
+from sklearn.linear_model import LinearRegression # 线性回归模型
+
+model=LinearRegression() 
+model.fit(x,y)
+y_predict=model.predict(x) # mse: 8269.109885100801
+
+#显示权重系数
+weights = model.coef_
+intercept = model.intercept_ 
