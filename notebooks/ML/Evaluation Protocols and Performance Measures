@@ -1,0 +1,440 @@
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import os
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.rcParams['font.sans-serif'] = [u'SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+RANDOM_STATE=42 
+
+url=r'C:\tmp\Titanic'
+        
+train_data = pd.read_csv(url+r'\train.csv')
+test_data = pd.read_csv(url+r'\test.csv')
+x = train_data.copy()[["Pclass", "Sex", "SibSp", "Parch"]]
+y = train_data.copy()["Survived"]
+
+# 2.2评估划分
+# 2.2.1留出法
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.2, 
+                                                    random_state=42)
+
+
+# 2.2.2 交叉验证法
+from sklearn.model_selection import KFold
+k = 10
+kf = KFold(n_splits=k, shuffle=True)
+for train_index, test_index in kf.split(x,y):  # 拆分
+    x_train, x_test = x.loc[train_index], x.loc[test_index]
+    y_train, y_test = y.loc[train_index], y.loc[test_index]
+    
+    # 训练模型
+    model.fit(x_train, y_train)
+    
+    # 预测测试集
+    y_pred = model.predict(x_test)
+    
+# 分层采样的KFold
+from sklearn.model_selection import StratifiedKFold
+k = 10
+kf = StratifiedKFold(n_splits=k, shuffle=True)
+# kf.get_n_splits(x, y)
+for train_index, test_index in kf.split(x,y):  # 拆分
+    x_traincv, x_testcv = x.loc[train_index], x.loc[test_index]
+    y_traincv, y_testcv = y.loc[train_index], y.loc[test_index]
+
+
+# 2.2.3自助法
+from sklearn.utils import resample
+
+#假设有一个数据集X和对应的标签y
+X = np.array([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]])
+y = np.array([0, 1, 0, 1, 0])
+
+#使用自助法进行抽样
+bootstrap_samples = []
+for _ in range(100):  # 生成10个自助样本
+    X_resampled, y_resampled = resample(X, y)
+    bootstrap_samples.append((X_resampled, y_resampled))
+#bootstrap_samples现在包含了100个自助样本，每个样本都是原始数据集的一个随机子集
+
+'''
+# 训练集 + 测试集合并做特征工程
+# sort根据版本不同，默认值不同
+data = pd.concat([train_data, test_data], sort=False) 
+# 特征工程
+data["FamilySize"] = data["SibSp"] + data["Parch"] + 1
+data["IsAlone"] = (data["FamilySize"] == 1).astype(int)
+data["Name_len"] = data["Name"].apply(lambda x: len(x.split()))
+# 性别的作用依赖于舱位，即男性在一等舱影响小在三等舱影响巨大
+# data["Sex_Pclass"] = data["Sex_male"] * data["Pclass"]
+# 从每个字符串中提取匹配第一个捕获组的内容
+# expand=False返回的是一个 Series（而不是单列的 DataFrame）
+# ，避免出现不必要的嵌套列
+data["Title"] = data["Name"].str.extract(" ([A-Za-z]+)\.", expand=False)
+data["Title"] = data["Title"].replace(
+    ["Mlle","Ms"], "Miss"
+).replace(
+    ["Mme"], "Mrs"
+)
+data["Title"] = data["Title"].replace(
+    ["Lady","Countess","Capt","Col","Don","Dr","Major","Rev","Sir","Jonkheer","Dona"],
+    "Rare"
+)
+data["HasCabin"] = data["Cabin"].notnull().astype(int)
+data["Fare_log"] = np.log1p(data["Fare"])
+# 缺失处理
+data["Age"] = data["Age"].fillna(data["Age"].median())
+data["Fare"] = data["Fare"].fillna(data["Fare"].median())
+data["Embarked"].fillna(data["Embarked"].mode()[0],inplace=True) # 用众数填充
+# 类别编码
+data = pd.get_dummies(
+    data,
+    columns=["Sex","Embarked","Title"],
+    drop_first=True # 删除通过编码生成的第一个类别，避免虚拟变量陷阱
+)
+
+train = data[data["Survived"].notna()]
+test = data[data["Survived"].isna()]
+
+X = train.drop(["Survived", "Name", "Ticket", "Cabin", "PassengerId", 'Fare'],
+               axis=1)
+y = train["Survived"]
+from sklearn.ensemble import RandomForestClassifier
+model = RandomForestClassifier(n_estimators=100, max_depth=5, 
+                               random_state=RANDOM_STATE)
+model.fit(X, y)
+y_predict = model.predict(X)
+'''
+
+
+# 2.3性能度量
+from sklearn.metrics import precision_recall_curve, average_precision_score
+from sklearn.metrics import mean_squared_error, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import roc_curve, roc_auc_score, confusion_matrix
+
+
+# 错误率=1-准确率
+def error_rate(y_pred, y_true):
+    """
+    计算错误率的函数。
+    
+    参数：
+    predicted (list): 预测值列表
+    actual (list): 实际值列表
+    
+    返回：
+    float: 错误率
+    """
+    total = len(y_pred)
+    errors = sum(1 for p, a in zip(y_pred, y_true) if p != a)
+    error_rate = errors / total
+    return error_rate
+
+error_rate = error_rate(y_predict, y)
+print("错误率：", error_rate)
+
+# P-R曲线
+y_score = model.predict_proba(X)[:, 1]
+
+# 计算 Precision 和 Recall
+precision, recall, thresholds = precision_recall_curve(
+    y,
+    y_score
+)
+
+# AP值（PR曲线面积）
+ap = average_precision_score(
+    y,
+    y_score
+)
+
+# 绘制P-R曲线
+plt.figure(figsize=(6, 4))
+
+plt.plot(
+    recall,
+    precision,
+    label=f'AP={ap:.3f}'
+)
+
+plt.xlabel("Recall")
+plt.ylabel("Precision")
+plt.title("Precision-Recall Curve")
+
+plt.legend()
+plt.grid()
+
+plt.show()
+
+
+# ROC曲线
+# 计算 ROC 曲线数据
+fpr, tpr, thresholds = roc_curve(
+    y,
+    y_score
+)
+
+# 计算AUC值
+auc = roc_auc_score(
+    y,
+    y_score
+)
+
+# 绘制 ROC 曲线
+plt.figure(figsize=(6, 4))
+
+plt.plot(
+    fpr,
+    tpr,
+    label=f"ROC curve (AUC={auc:.3f})"
+)
+
+# 随机分类器基准线
+plt.plot(
+    [0, 1],
+    [0, 1],
+    linestyle="--"
+)
+
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve")
+
+plt.legend()
+plt.grid()
+
+plt.show()
+
+
+def expected_cost_curve(
+    y_true,
+    y_score,
+    c_fn=1,
+    c_fp=1
+):
+
+    thresholds = np.linspace(0, 1, 100)
+
+    costs = []
+
+    # 正反例比例
+    p_positive = np.mean(y_true == 1)
+    p_negative = np.mean(y_true == 0)
+
+
+    for threshold in thresholds:
+
+        y_pred = (y_score >= threshold).astype(int)
+
+        tn, fp, fn, tp = confusion_matrix(
+            y_true,
+            y_pred
+        ).ravel()
+
+
+        # 假反例率
+        fnr = fn / (fn + tp)
+
+        # 假正例率
+        fpr = fp / (fp + tn)
+
+
+        # 西瓜书期望总体代价
+        ec = (
+            p_positive * fnr * c_fn
+            +
+            p_negative * fpr * c_fp
+        )
+
+        costs.append(ec)
+
+
+    return thresholds, costs
+
+
+
+thresholds, costs = expected_cost_curve(
+    y,
+    y_score,
+    c_fn=5,
+    c_fp=1
+)
+
+
+plt.figure(figsize=(7,4))
+
+plt.plot(
+    thresholds,
+    costs
+)
+
+plt.xlabel("Threshold")
+plt.ylabel("Expected Cost")
+
+plt.title("Cost Curve")
+
+plt.grid()
+
+plt.show()
+
+print(f"mse: {np.sqrt(mean_squared_error(y, y_predict))}") # 均方误差
+print(f'confusion_matrix：{confusion_matrix(y,y_predict)}')
+print(f"F1 Score: {f1_score(y, y_predict)}")
+print(f'accuracy score is: {accuracy_score(y,y_predict)}')
+print(f'precision score is: {precision_score(y,y_predict)}') # 查准率
+print(f'recall score is: {recall_score(y,y_predict)}') # 查全率
+print(f'auc is: {roc_auc_score(y, y_predict)}')
+
+
+# 2.4比较检验
+# 2.4.1假设检验
+from scipy import stats
+def t_test(k_fold_errors, a):
+    """
+    使用T检验推断模型的泛化错误率是否为K样本错误率的平均值。
+    参数：
+    k_fold_errors (list): K折交叉验证得到的K个预测的错误率列表。
+    a (float): 假设模型预测的错误泛化率。
+    返回：
+    tuple: T统计量和p值。
+    """
+    # 计算K样本错误率的平均值
+    mean_k_fold_error = np.mean(k_fold_errors)
+    # 计算标准误差，衡量的是样本平均值的波动性（分母是 n-1，所以用 ddof=1）
+    se = np.std(k_fold_errors, ddof=1) / np.sqrt(len(k_fold_errors))
+    # 计算T统计量
+    t_statistic = (mean_k_fold_error-a) / se
+    # 计算自由度
+    df = len(k_fold_errors) - 1
+    # 计算p值 也就是累计分布函数
+    # stats.t.cdf(x, df)：计算T分布中，从负无穷到 x 的累积概率（左侧面积）
+    p_value = 2 * (1 - stats.t.cdf(np.abs(t_statistic), df))
+    return t_statistic, p_value
+# 示例
+# K折交叉验证得到的K个预测的错误率列表
+k_fold_errors = [0.1, 0.15, 0.12, 0.13, 0.14] 
+a = 0.16 # 假设模型在的泛化错误率为0.16
+t_statistic, p_value = t_test(k_fold_errors, a)
+print("T统计量：", t_statistic)
+print("p值：", p_value)
+#也可以用scipy库中的单样本T检验
+from scipy import stats
+t_statistic, p_value = stats.ttest_1samp(k_fold_errors, a)
+print("T统计量：", t_statistic)
+print("P值：", p_value)
+
+
+# 2.4.2 交叉验证T检验
+def t_test(model_a_errors, model_b_errors):
+    """
+    使用T检验比较两个模型的预测错误率是否有显著差异。
+    参数：
+    model_a_errors (list): 模型A的K折交叉验证预测错误率列表
+    model_b_errors (list): 模型B的K折交叉验证预测错误率列表
+    返回：
+    t_statistic (float): T统计量
+    p_value (float): p值
+    """
+    # 计算均值和标准差
+    mean_a = np.mean(model_a_errors)
+    mean_b = np.mean(model_b_errors)
+    std_a = np.std(model_a_errors, ddof=1)
+    std_b = np.std(model_b_errors, ddof=1)
+    n_a = len(model_a_errors)
+    n_b = len(model_b_errors)
+    # 分子：信号强度，分母：噪声幅度，直觉：这个公式计算的是信噪比
+    t_statistic = (mean_a - mean_b) / np.sqrt((std_a**2 / n_a) + (std_b**2 /
+    n_b))
+    # 计算自由度
+    df = n_a + n_b - 2
+    # 计算p值
+    p_value = 2 * (1 - stats.t.cdf(np.abs(t_statistic), df))
+    return t_statistic, p_value
+# 示例数据
+model_a_errors = [0.1, 0.15, 0.12, 0.14, 0.16]
+model_b_errors = [0.13, 0.17, 0.14, 0.15, 0.18]
+# 进行T检验
+t_statistic, p_value = t_test(model_a_errors, model_b_errors)
+print("T统计量：", t_statistic)
+print("p值：", p_value)
+#也可以用scipy库中的双样本T检验
+from scipy.stats import ttest_ind
+t_statistic, p_value = ttest_ind(model_a_errors, model_b_errors)
+print("T统计量：", t_statistic)
+print("P值：", p_value)
+
+
+# 2.4.3 McNemar检验 （配对卡方检验）
+from scipy.stats import chi2
+from scipy.stats import chi2_contingency
+def mcnemar_test(y_true, y_pred1, y_pred2):
+    """
+    使用McNemar检验评估两个模型的预测性能是否有差异。
+    参数：
+    y_pred1: 模型A预测结果
+    y_pred2: 模型B预测结果
+    y_true：真实的预测标签
+    返回：
+    chi2：统计量
+    p_value: McNemar检验的p值
+    """
+    # Create a contingency table
+    contingency_table = np.zeros((2, 2))
+    for i in range(len(y_true)):
+        if y_pred1[i] == y_true[i] :
+            if y_pred2[i] == y_true[i]:
+                contingency_table[0, 0] += 1
+            else:
+                contingency_table[0, 1] += 1
+        else:
+            if y_pred2[i] == y_true[i]:
+                contingency_table[1, 0] += 1
+            else:
+                contingency_table[1, 1] += 1
+    # 打印列联表
+    print(contingency_table)
+    chi2, p_value, _, _ = chi2_contingency(contingency_table)
+    return chi2, p_value
+# Example usage:
+y_true = [1, 0, 1, 0, 0, 0, 1, 1, 1, 0]
+y_pred1 = [1, 0, 1, 0, 0, 0, 1, 0, 1, 1]
+y_pred2 = [1, 1, 1, 0, 0, 0, 1, 1, 1, 1]
+chi2,p_value = mcnemar_test(y_true, y_pred1, y_pred2)
+print("统计量：", chi2)
+print("p值：", p_value)
+
+
+# 2.4.4 Friedman检验
+from scipy.stats import friedmanchisquare
+# 假设模型A、B、C在相同数据集上的性能评分
+scores_A = [1, 2, 3, 4, 5]
+scores_B = [2, 3, 4, 5, 6]
+scores_C = [4, 5, 6, 7, 8]
+# 执行Friedman检验
+statistic, p_value = friedmanchisquare(scores_A, scores_B, scores_C)
+print(f"Friedman检验统计量: {statistic}, p值: {p_value}")
+
+
+# 偏差与方差
+import math
+#期望输出与真实标签的差别
+y_true = [1, 0, 1, 1, 0]
+y_pred = [0.9, 0.8, 0.7, 0.6, 0.5]
+bias_2=sum([(x - y) ** 2 for x, y in zip(y_true , y_pred)])
+bias=math.sqrt(bias_2)
+
+# 计算方差
+mean_true = np.mean(y_true)
+squared_errors = sum((y_pred - mean_true) ** 2)
+var= np.mean(squared_errors)
+print("方差：", var)
+
+
+
+
+

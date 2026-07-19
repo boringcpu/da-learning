@@ -1,0 +1,241 @@
+import baostock as bs
+import pandas as pd
+import openpyxl
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
+import random
+import xlwings as xw
+import os
+import datetime
+import time
+from dateutil.relativedelta import relativedelta
+
+import warnings 
+warnings.filterwarnings('ignore')
+
+tics=time.time()
+# url=r'D:\BC53\我的文档\XTC\tmp'+'\'
+my_today=datetime.datetime.now()
+my_date=my_today.strftime('%Y%m%d')
+if my_today.weekday() == 0:
+    last_date=(my_today-relativedelta(days=3)).strftime('%Y-%m-%d')
+else:
+    last_date=(my_today-relativedelta(days=1)).strftime('%Y-%m-%d')
+# last_date=(my_today-relativedelta(days=4)).strftime('%Y-%m-%d')
+#### 登陆系统
+# 显示登陆返回信息
+# print('login respond error_code:'+lg.error_code)
+# print('login respond  error_msg:'+lg.error_msg)
+#### 获取沪深A股历史K线数据
+# 详细指标参数，参见“历史行情指标参数”章节；“分钟线”参数与“日线”参数不同。“分钟线”
+# 不包含指数。
+# 分钟线指标：date,time,code,open,high,low,close,volume,amount,adjustflag
+# 周月线指标：date,code,open,high,low,close,volume,amount,adjustflag,turn,pctChg
+# 登陆系统
+lg = bs.login()  # 调用 login 方法进行登陆
+# 显示登陆返回信息
+print('login respond error_code:'+lg.error_code) # 打印登陆返回错误码
+print('login respond  error_msg:'+lg.error_msg)  # 打印登陆返回错误信息
+# 获取上证50成分股，date：查询日期
+# rs = bs.query_sz50_stocks()  # 调用 query_sz50_stocks 方法获取上证50成分股信息
+# rs = bs.query_hs300_stocks()
+rs = bs.query_stock_basic()
+print('query_sz50 error_code:'+rs.error_code)  # 打印方法返回错误码
+print('query_sz50  error_msg:'+rs.error_msg)   # 打印方法返回错误信息
+# 打印结果集
+sz50_stocks = []   # 创建一个空列表，用于存储查询结果
+while (rs.error_code == '0') & rs.next():
+    # 如果查询没有出错且还有数据
+    sz50_stocks.append(rs.get_row_data())   # 将获取到的数据添加到列表中
+    result = pd.DataFrame(sz50_stocks, columns=rs.fields)  # 使用 pandas 将数据转换为 DataFrame 格式
+    # 结果集输出到csv文件
+    # result.to_csv(url+"sz50_stocks.csv", encoding="gbk", index=False)  # 将结果保存为 csv 文件
+    # display(result)   # 打印结果
+    # 登出系统
+bs.logout()  # 调用 logout 方法进行登出
+df_sign=pd.DataFrame(columns=['code','signal','standard','buy_P','now_P',
+'date',
+'flg','highest','last_highest','diff'])
+tmp=result.copy()
+tmp=tmp[(tmp['type']=='1')&(tmp['status']=='1')]
+count=0
+exist = []
+# df_data=pd.read_excel(r'D:\BC53\我的文档\XTC\tmp\flg.xlsx',
+# sheet_name='exception')
+# tmp=tmp[~tmp['code'].isin(df_data['code'])]
+#%%
+tmp=tmp[~tmp['code'].isin(exist)]
+lg = bs.login()
+for chosen in tmp['code']:
+# for chosen in chosens:
+    rs = bs.query_history_k_data_plus(
+        chosen,# "sh"代表上海证券交易所，"sz"代表深圳证券交易所
+        "date,high,low,close,peTTM",
+        start_date='2021-05-01', end_date=last_date,
+        frequency="d",# 查询频率
+        adjustflag="2"# 复权类型，默认不复权；1：后复权；2：前复权
+        )
+    
+    #### 打印结果集 ####
+    data_list = []
+    while (rs.error_code == '0') & rs.next():
+        # 获取一条记录，将记录合并在一起
+        data_list.append(rs.get_row_data())
+    result = pd.DataFrame(data_list, columns=rs.fields)
+    
+    #### 登出系统 ####
+    
+    df=result.copy()
+    exist.append(chosen)
+    count=count+1
+    print(count)
+    
+    if df.empty:
+        break
+    df.set_index('date', inplace=True)
+    if df[df.index==last_date].empty:
+        continue
+    if df.index[0][:4]>'2022':
+        continue
+    # 计算5天和20天的移动平均线
+    df['close']=df['close'].astype(float)
+    df['high']=df['high'].astype(float)
+    df['low']=df['high'].astype(float)
+    df['MA5'] = df['close'].rolling(window=5).mean()
+    df['MA20'] = df['close'].rolling(window=20).mean()
+    
+    
+    # 找到5天移动平均线从下方穿越20天移动平均线的点
+    buy_signals = (df['MA5'] > df['MA20']) & (df['MA5'].shift(1) < df['MA20'].shift(1))
+    sell_signals = (df['MA5'] < df['MA20']) & (df['MA5'].shift(1) > df['MA20'].shift(1))
+    
+    df['signal']='0'
+    df.loc[buy_signals,'signal']='1'
+    df.loc[sell_signals,'signal']='-1'
+    
+    signal_dates = df[df['signal'] != '0'].index
+    df['period'] = (df['signal'] != '0').cumsum()
+    period_max = df[df['signal']=='0'].groupby('period')['high'].max().reset_index()
+    period_min = df[df['signal']=='0'].groupby('period')['low'].min().reset_index()
+    compared = df[df['signal']!='0'][['period','close','signal','MA20']].reset_index()
+    df_ = compared.merge(period_min, on='period', how='left')\
+                       .merge(period_max, on='period', how='left')
+    if df_.empty:
+        continue
+    df_['lowest']=df_['low'].astype(float)/df_['close'].astype(float)
+    df_['highest']=df_['high'].astype(float)/df_['close'].astype(float)
+    
+    df_1=df_[df_['signal']=='-1'].copy()
+    df_2=df_[df_['signal']=='1'].copy()
+    if df_1.empty or df_2.empty:
+        continue    
+    # df.to_excel(url+f'{chosen}.xlsx')
+    # from openpyxl.styles import fills
+    
+    
+    # app=xw.App(visible=False,add_book=False)
+    # wb=app.books.open(url+f'{chosen}.xlsx')
+    # # ws=wb['Sheet1']
+    # ws=wb.sheets['Sheet1']
+    
+    
+    # green_fill = PatternFill(start_color='00FF00', end_color='00FF00',fill_type='solid')
+    # yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00',fill_type='solid')
+    
+    # ws.api.Cells.Font.Name = "微软雅黑"        
+    
+    # for i in range(len(df)):
+    #     # print(row_num)
+    #     score=df.iloc[i].name
+    #     if score in buy_signals[buy_signals == True].index:
+    #         # ws.cell(row=i+2, column=1).fill = green_fill
+    #         ws.range(f"A{i+2}:Z{i+2}").color = (144, 238, 144)
+    #         # print(ws.cell(row=i+2, column=1).value)
+    #     elif score in sell_signals[sell_signals == True].index:
+    #         ws.range(f"A{i+2}:Z{i+2}").color = (173, 216, 230)
+    last_sell=float(df_1.iloc[-2,7])
+    df_1.sort_values('lowest',inplace=True)
+    df_1.reset_index(inplace=True)
+    standard_low=df_1.iloc[int(len(df_1)/4)-1]['lowest']
+    df_2.sort_values('date',inplace=True)
+    last_buy=float(df_2.iloc[-2,8])
+    df_2.sort_values('highest',inplace=True)
+    df_2.reset_index(inplace=True)
+    standard_high=df_2.iloc[int(len(df_2)/4)]['highest']
+    last_buy_signal=buy_signals[buy_signals == True].index[-1]
+    last_sell_signal=sell_signals[sell_signals == True].index[-1]
+    df_2.sort_values('date',inplace=True)
+    df_2['rate']=(df_2['close']/df_2['close'].shift(1)-1)*100
+    df_2['rate'].fillna('999',inplace=True)
+    df_2['rate']=df_2['rate'].astype(int)
+    diff=df_2.iloc[-1,10]
+    
+    
+    buy_=float(df_2[df_2['date']==last_buy_signal]['close'].iloc[0])
+    if buy_>max(df_2['high'].astype(float))*.71:
+        continue
+    now_1=float(df[df.index==last_date]['close'].iloc[0])/buy_
+    sell_=float(df_1[df_1['date']==last_sell_signal]['close'].iloc[0])
+    now_2=float(df[df.index==last_date]['close'].iloc[0])/sell_
+    if float(standard_high)<=df_[df_['date']==last_buy_signal]['highest'].iloc[0]: 
+        flg=1 
+    else: 
+        flg=0
+    df_sign.loc[len(df_sign)] = [chosen, 'Buy',standard_high,buy_,now_1,
+                                 last_buy_signal,flg,
+                                 df_[df_['date']==last_buy_signal]['highest'].iloc[0],
+                                 last_buy,diff]
+    if sell_*float(standard_low)>df_[df_['date']==last_sell_signal]['lowest'].iloc[0]:
+        flg=1 
+    else: 
+        flg=0
+    df_sign.loc[len(df_sign)] = [chosen, 'Sell',standard_low,sell_,now_2,
+                                 last_sell_signal,flg,
+                                 df_[df_['date']==last_sell_signal]['lowest'].iloc[0],
+                                 last_sell,diff]
+    # # 如果存在买入信号，打印买入
+    # if buy_signals.any():
+    #     print(f"{chosen} Buy signal on dates {buy_signals[buy_signals == True].index[-1]}")
+    # if sell_signals.any():
+    #     print(f"{chosen} Sell signal on dates {sell_signals[sell_signals == True].index[-1]}")
+    
+    # wb.save(url+f'{chosen}.xlsx')
+    
+    # wb.close()  # 确保关闭工作簿
+    # df_sign['perc']=df_sign['close']/df_sign['P']
+    # df_buy=df_sign[(df_sign['flg']==1)&(df_sign['signal']=='Buy')&(df_sign['standard']>=1.03)]
+    # df_sell=df_sign[(df_sign['flg']==1)&(df_sign['signal']=='Sell')]
+    # df_sign['rate']=df_sign['close']/df_sign['MA']-1
+df_buy=df_sign[(df_sign['signal']=='Buy')]
+df_sell=df_sign[(df_sign['signal']=='Sell')]
+lg = bs.login()
+exception= []
+for j in df_buy['code']:
+    profit_list = []
+for i in ('2023','2024','2025'):
+    rs_profit = bs.query_profit_data(code=j, year=i)
+while (rs_profit.error_code == '0') & rs_profit.next():
+    profit_list.append(rs_profit.get_row_data())
+    rs_profit = bs.query_profit_data(code=j, year=2026, quarter=1)
+while (rs_profit.error_code == '0') & rs_profit.next():
+    profit_list.append(rs_profit.get_row_data())
+# 转换为DataFrame格式
+df_profit = pd.DataFrame(profit_list, columns=rs_profit.fields)
+if (df_profit['netProfit'].astype(float)<0).any():
+    exception.append(j)
+df_buy=df_buy[~df_buy['code'].isin(exception)]
+df_buy_1=df_buy[(df_buy['standard']>1.03)&(df_buy['diff']<-10)].copy()
+df_buy_2=df_buy[(df_buy['standard']>1.03)&(df_buy['last_highest']<standard_high)&(df_buy['diff']<0)]
+# df_buy=pd.concat([df_buy_1,df_buy_2])
+# df_buy.drop_duplicates('code',inplace=True)
+# ans=[]
+# df_last=df_buy[df_buy['date']==last_date]
+# for j, k in df_last[['code','last_highest']].itertuples(index=False, name=None):
+# df_MA=MA_single.MA(j,k)
+# if df_MA==1:
+# ans.append(j)
+bs.logout()
+# df_ans=df_buy[df_buy['code'].isin(ans)]
+tocs=time.time()
+print(f'用时：{int((tocs-tics)/60)}min')
+    
